@@ -46,6 +46,8 @@ struct pkt {
 
 struct pkt A_sender_window[MAX_BUFFER_SIZE]; // Sender window array for A
 struct pkt B_sender_window[MAX_BUFFER_SIZE]; // Sender window array for B
+struct pkt A_recvPkt;
+struct pkt B_recvPkt;
 
 int A_base = 1;
 int A_next_seqnum = 1;
@@ -69,7 +71,7 @@ int check_sum(struct pkt* packet) {
     sum += packet->seqnum;
     sum += packet->acknum;
     for (int i = 0; i < 20; ++i) {
-        sum += packet->payload[i];
+        sum += (int)(packet->payload[i]);
     }
     return sum;
 }
@@ -78,7 +80,7 @@ struct pkt make_pkt(char* data, int seqnum, int acknum) {
     struct pkt packet;
     packet.seqnum = seqnum;
     packet.acknum = acknum;
-    packet.checksum = check_sum(data, seqnum, acknum);
+    packet.checksum = check_sum(&packet);
     
     memset(packet.payload, 0, sizeof(packet.payload));
     strncpy(packet.payload, data, sizeof(packet.payload)-1); //copy data to payloads
@@ -138,16 +140,24 @@ struct msg message;
 A_input(packet)
 struct pkt packet;
 {
-    if (check_sum(&packet) == 0) {
+    if (check_sum(&packet) == packet.checksum) {
         int seqnum = packet.seqnum;
 
         if (A_expected_seqnum == seqnum) { // Receiver: get data
             printf("A_input: recveive packet(seq = %d) : % s\n", packet.seqnum, packet.payload);
             tolayer5(0, packet.payload); // Deliver data to layer 5
             
+            A_recvPkt.acknum = A_expected_seqnum;
+            A_recvPkt.checksum = check_sum(&A_recvPkt);
+            tolayer3(0, A_recvPkt);
+
             A_ACKnum = A_expected_seqnum;
             A_ACKstate = 1; // send ACK
             A_expected_seqnum++;
+        }
+        else {
+            tolayer3(0, A_recvPkt);
+            return;
         }
 
         if (A_ACKnum != 999) { // Sender: get ACK
@@ -165,7 +175,7 @@ struct pkt packet;
     }
     else { // Corrupted packet
         printf("packet drop: Corrupted packet.\n");
-        return;
+        tolayer3(0, A_recvPkt);
     }
 }
 
@@ -193,6 +203,11 @@ A_init()
     A_windowSize = 8;
     A_timer = 15;
     memset(A_sender_window, 0, sizeof(A_sender_window));
+
+    A_recvPkt.acknum = 0;
+    A_recvPkt.seqnum = -1;
+    memset(A_recvPkt.payload, 0, 20);
+    A_recvPkt.checksum = check_sum(&A_recvPkt);
 }
 
 
@@ -202,16 +217,24 @@ A_init()
 B_input(packet)
 struct pkt packet;
 {
-    if (check_sum(&packet) == 0) {
+    if (check_sum(&packet) == packet.checksum) {
         int seqnum = packet.seqnum;
 ;
         if (B_expected_seqnum == seqnum) { // Receiver: get data
             printf("B_input: recveive packet(seq = %d) : % s\n", packet.seqnum, packet.payload);
             tolayer5(1, packet.payload); // Deliver data to layer 5
 
+            B_recvPkt.acknum = B_expected_seqnum;
+            B_recvPkt.checksum = check_sum(&B_recvPkt);
+            tolayer3(1, B_recvPkt);
+
             B_ACKnum = B_expected_seqnum;
             B_ACKstate = 1; // send ACK
             B_expected_seqnum++;
+        }
+        else {
+            tolayer3(1, B_recvPkt);
+            return;
         }
 
         if (B_ACKnum != 999) { // Sender: get ACK
@@ -229,7 +252,7 @@ struct pkt packet;
     }
     else { // Corrupted packet
         printf("packet drop: Corrupted packet.\n");
-        return;
+        tolayer3(1, B_recvPkt);
     }
 }
 
@@ -257,6 +280,11 @@ B_init()
     B_windowSize = 8;
     B_timer = 15;
     memset(B_sender_window, 0, sizeof(B_sender_window));
+
+    B_recvPkt.acknum = 0;
+    B_recvPkt.seqnum = -1;
+    memset(B_recvPkt.payload, 0, 20);
+    B_recvPkt.checksum = check_sum(&B_recvPkt);
 }
 
 
