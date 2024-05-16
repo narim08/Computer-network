@@ -45,10 +45,10 @@ struct pkt {
 
 // A to B
 // Sender: A
-int A_base;
+int A_base; // base index of window buffer
 int A_next_seqnum;
 int A_windowSize;
-float A_timer;
+float A_timer; // RTT
 int A_next_buff; // window buffer index
 struct pkt A_pkt_buff[MAX_BUFFER_SIZE]; // window buffer
 
@@ -73,13 +73,14 @@ int check_sum(struct pkt* packet) { // 8-bit 1's complement checksum
 
 struct pkt make_pkt(char* data, int seqnum, int acknum) { // make packet
     struct pkt packet;
+    // data settings
     packet.seqnum = seqnum;
     packet.acknum = acknum;
     packet.checksum = check_sum(&packet);
 
-    memset(packet.payload, 0, sizeof(packet.payload));
+    memset(packet.payload, 0, sizeof(packet.payload)); //clear buffer
     strncpy(packet.payload, data, sizeof(packet.payload) - 1); // copy data to payload
-    packet.payload[strlen(data)] = '\0';
+    packet.payload[strlen(data)] = '\0'; // set string end
 
     return packet;
 }
@@ -105,13 +106,14 @@ void sndWindow(void) { //send packet to window
 A_output(message)
 struct msg message;
 {
-    struct pkt* sndpkt = &A_pkt_buff[A_next_buff % MAX_BUFFER_SIZE];
+    struct pkt* sndpkt = &A_pkt_buff[A_next_buff % MAX_BUFFER_SIZE]; // extract packet storage location
+    // packet data settings
     sndpkt->seqnum = A_next_buff;
     strncpy(sndpkt->payload, &message, sizeof(sndpkt->payload) - 1); //copy data to payloads
     sndpkt->checksum = check_sum(sndpkt);
 
-    A_next_buff++;
-    sndWindow();
+    A_next_buff++; // windows buffer index update
+    sndWindow(); // send data
 }
 
 B_output(message)  /* need be completed only for extra credit */
@@ -123,24 +125,24 @@ struct msg message;
 A_input(packet)
 struct pkt packet;
 {
-    if (check_sum(&packet) == packet.checksum) {
-        if (packet.acknum < A_base) { //get NAK
+    if (check_sum(&packet) == packet.checksum) { // no error in the packet
+        if (packet.acknum < A_base) { // get NAK
             printf("A_input: get NAK (%d)\n", packet.acknum);
             return;
         }
 
         //get ACK
         printf("A_input: get ACK (%d)\n", packet.acknum);
-        A_base = packet.acknum + 1;
-        if (A_base == A_next_seqnum) {
+        A_base = packet.acknum + 1; // windows base location update
+        if (A_base == A_next_seqnum) { // sent all window, stop timer
             stoptimer(0);
-            sndWindow();
+            sndWindow(); // send the next one
         }
-        else {
-            starttimer(0, A_timer);
+        else { // packet left to send to Windows
+            starttimer(0, A_timer); // timer Restart
         }
     }
-    else {
+    else { // packet contains error
         printf("A_input: Corrupted packet.\n");
     }
 }
@@ -149,13 +151,14 @@ struct pkt packet;
 A_timerinterrupt()
 {
     printf("A_timerinterrupt: time out!\n");
-    starttimer(0, A_timer);
+    starttimer(0, A_timer); // timer Restart
     printf("A_timerinterrupt: start timer\n");
 
+    // retransmit packets in Windows
     for (int i = A_base; i < A_next_seqnum; ++i) {
         struct pkt* packet = &A_pkt_buff[i % MAX_BUFFER_SIZE];
         printf("A_timerinterrupt: resend packet (seq=%d): %s\n", packet->seqnum, packet->payload);
-        tolayer3(0, *packet);
+        tolayer3(0, *packet); // send to network
     }
 }
 
@@ -182,21 +185,21 @@ struct pkt packet;
     if (check_sum(&packet) == packet.checksum) {
         if (B_expected_seqnum == packet.seqnum) { // get data
             printf("B_input: received packet (seq=%d): %s\n", packet.seqnum, packet.payload);
-            tolayer5(1, packet.payload);
+            tolayer5(1, packet.payload); // send data to upper layer
 
             printf("B_input: send ACK (%d)\n", B_expected_seqnum);
             B_sndpkt.acknum = B_expected_seqnum;
             B_sndpkt.checksum = check_sum(&B_sndpkt);
-            tolayer3(1, B_sndpkt);
+            tolayer3(1, B_sndpkt); // send ack to network
 
             B_expected_seqnum++;
         }
-        else { //not the expected seqnum
+        else { //not the expected seqnum(NAK)
             tolayer3(1, B_sndpkt);
             return;
         }
     }
-    else { //paket corruped
+    else { //paket corruped(NAK)
         tolayer3(1, B_sndpkt);
     }
 }
@@ -204,7 +207,6 @@ struct pkt packet;
 /* called when B's timer goes off */
 B_timerinterrupt()
 {
-    
 }
 
 /* the following rouytine will be called once (only) before any other */
